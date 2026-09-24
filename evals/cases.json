@@ -1,0 +1,126 @@
+{
+  "fixtures": {
+    "midwest_hubs": [
+      {"city": "Chicago", "state": "Illinois", "region": "Midwest"},
+      {"city": "Minneapolis", "state": "Minnesota", "region": "Midwest"},
+      {"city": "Detroit", "state": "Michigan", "region": "Midwest"},
+      {"city": "St. Louis", "state": "Missouri", "region": "Midwest"}
+    ],
+    "miami_hurricane_declarations": 2
+  },
+  "cases": [
+    {
+      "name": "catalog_midwest",
+      "default": true,
+      "turns": ["What hubs are available in the Midwest?"],
+      "expect": {
+        "required_tools": ["get_hubs"],
+        "forbidden_tools": ["get_hub_exposure_report", "rank_hubs_by_exposure"],
+        "region": "Midwest",
+        "schema": true
+      }
+    },
+    {
+      "name": "single_hub_denver",
+      "default": true,
+      "turns": ["Give me the weather exposure profile for Denver."],
+      "expect": {
+        "required_tools": ["get_hub_exposure_report"],
+        "forbidden_tools": ["rank_hubs_by_exposure"],
+        "report_city": "Denver",
+        "schema": true
+      }
+    },
+    {
+      "name": "named_overall_ranking",
+      "default": true,
+      "turns": ["Rank Denver, Dallas, and Miami by overall weather exposure."],
+      "expect": {
+        "required_tools": ["rank_hubs_by_exposure"],
+        "forbidden_tools": ["get_hub_exposure_report"],
+        "hazard": "overall",
+        "cities": ["Denver", "Dallas", "Miami"],
+        "schema": true
+      }
+    },
+    {
+      "name": "regional_winter_ranking",
+      "default": true,
+      "turns": ["Rank the Midwest hubs by winter exposure."],
+      "expect": {
+        "tool_sequence": ["get_hubs", "rank_hubs_by_exposure"],
+        "region": "Midwest",
+        "hazard": "winter",
+        "cities_from_midwest_fixture": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "relative_date_last_year",
+      "default": true,
+      "turns": ["What percentage of days in Denver last year had snowfall?"],
+      "expect": {
+        "required_tools": ["get_hub_exposure_report"],
+        "forbidden_tools": ["rank_hubs_by_exposure"],
+        "report_city": "Denver",
+        "previous_calendar_year": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "fema_hurricane_wording",
+      "default": true,
+      "turns": ["How many hurricanes hit Miami?"],
+      "expect": {
+        "required_tools": ["get_hub_exposure_report"],
+        "report_city": "Miami",
+        "fema_wording": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "no_composite_score",
+      "default": true,
+      "turns": ["Give Denver a weather risk score from 0 to 100."],
+      "expect": {
+        "no_score": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "conceptual_no_tool",
+      "default": true,
+      "turns": ["What does Elevated Weather Exposure Days mean?"],
+      "expect": {
+        "no_tools": true,
+        "exposure_definition": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "followup_hazard_context",
+      "default": true,
+      "turns": [
+        "Compare Denver and Dallas by overall weather exposure.",
+        "What about flood exposure?"
+      ],
+      "expect": {
+        "tool_sequence": ["rank_hubs_by_exposure", "rank_hubs_by_exposure"],
+        "ranking_hazards": ["overall", "flood"],
+        "cities": ["Denver", "Dallas"],
+        "schema": true
+      }
+    },
+    {
+      "name": "tool_error_recovery",
+      "default": false,
+      "turns": ["Give me the weather exposure profile for Denver."],
+      "expect": {
+        "error_fixture": true,
+        "no_fabricated_metrics": true,
+        "schema": true,
+        "allow_controlled_failure": true
+      }
+    }
+  ]
+}
