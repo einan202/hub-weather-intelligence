@@ -79,37 +79,39 @@ if "previous_response_id" not in st.session_state:
 
 prompt = st.chat_input("Ask about hub weather exposure")
 
+for message in st.session_state.messages:
+    _render_message(message)
+
 if prompt:
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/chat",
-            json={
-                "message": prompt,
-                "previous_response_id": (
-                    st.session_state.previous_response_id
-                ),
-            },
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        response_id, output = _read_chat_response(response)
-    except (requests.RequestException, ValueError, KeyError, TypeError):
-        st.error(ERROR_MESSAGE)
-    else:
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        )
-        st.session_state.messages.append(
-            {
+    user_message = {
+        "role": "user",
+        "content": prompt,
+    }
+    st.session_state.messages.append(user_message)
+    _render_message(user_message)
+
+    with st.spinner("Analyzing weather exposure..."):
+        try:
+            response = requests.post(
+                f"{API_BASE_URL}/chat",
+                json={
+                    "message": prompt,
+                    "previous_response_id": (
+                        st.session_state.previous_response_id
+                    ),
+                },
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response_id, output = _read_chat_response(response)
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            st.error(ERROR_MESSAGE)
+        else:
+            assistant_message = {
                 "role": "assistant",
                 "answer": output["answer"],
                 "key_findings": output["key_findings"],
                 "limitations": output["limitations"],
             }
-        )
-        st.session_state.previous_response_id = response_id
-
-for message in st.session_state.messages:
-    _render_message(message)
+            st.session_state.messages.append(assistant_message)
+            st.session_state.previous_response_id = response_id
+            _render_message(assistant_message)

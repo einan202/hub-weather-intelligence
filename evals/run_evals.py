@@ -42,6 +42,96 @@ CONTROLLED_FAILURES = {
     "Model response did not include a parsed final answer.",
 }
 
+# Plural "floods" and "flood events" avoid matching "flood declarations".
+FLOOD_EVENT_OVERCLAIM = re.compile(
+    r"\bmore\s+(?:frequent|intense|severe)\s+floods\b"
+    r"|\bmore\s+(?:frequent|intense|severe)\s+flood\s+events\b"
+    r"|\bmore\s+(?:frequent|intense|severe)\s+flooding\b"
+    r"|\bmore\s+flood\s+events\b"
+    r"|\bmore\s+floods\b"
+    r"|\bfloods?\s+more\s+(?:frequently|often)\b"
+    r"|\bflooding\s+more\s+(?:frequently|often)\b"
+    r"|\bflooded\s+more\s+(?:frequently|often)\b"
+    r"|\b(?:higher|greater|increased)\s+flood\s+"
+    r"(?:frequency|intensity|severity)\b"
+    r"|\b(?:higher|greater)\s+(?:frequency|intensity|severity)\s+"
+    r"of\s+floods\b"
+    r"|\bmore\s+flooding\s+incidents\b"
+    r"|\bmore\s+flood\s+incidents\b"
+    r"|\b(?:greater|higher|more)\s+flood\s+impact\b"
+    r"|\bflood\s+impact\s+is\s+(?:greater|higher|larger)\b",
+    re.IGNORECASE,
+)
+
+# "high-precipitation days" is the metric name and must not match.
+PRECIP_EVENT_RENAME = re.compile(
+    r"\bhigh[-\s]precipitation\s+events?\b"
+    r"|\bheavy\s+(?:precipitation|precip|rain|rainfall)\s+events?\b"
+    r"|\b(?:extreme|severe|intense)\s+"
+    r"(?:precipitation|rain|rainfall)\s+events?\b",
+    re.IGNORECASE,
+)
+
+OUTCOME_OVERCLAIM = re.compile(
+    r"\b(?:high|higher|greater|increased)\s+"
+    r"(?:weather\s+|operational\s+)?disruption\s+risks?\b"
+    r"|\boperational\s+disruption\s+risks?\s+"
+    r"(?:is|are)\s+(?:high|higher|elevated)\b"
+    r"|\bdisruption\s+risks?\s+(?:is|are)\s+"
+    r"(?:considered\s+|rated\s+)?(?:high|higher|elevated|driven)\b"
+    r"|\bpose[sd]?\s+disruption\s+risks?\b"
+    r"|\bgreater\s+operational\s+disruption(?:\s+risks?)?\b"
+    r"|\blikely\s+to\s+(?:experience|face|suffer)\s+"
+    r"(?:operational\s+)?disruption\b"
+    r"|\b(?:high|higher|elevated)\s+shutdown\s+probability\b"
+    r"|\bshutdown\s+probability\s+is\s+(?:high|higher|elevated)\b"
+    r"|\bdirect(?:ly)?\s+(?:physical(?:ly)?\s+)?impact(?:ed)?\b"
+    r"|\bphysical(?:ly)?\s+(?:impact(?:ed)?|affected)\b"
+    r"|\bhazards?\s+directly\s+affected\b"
+    r"|\bdirectly\s+affected\s+(?:dallas|the\s+hub|the\s+city)\b"
+    r"|\bfuture\s+disruption\b"
+    r"|\b(?:elevated|high|higher|greater)\s+risk\s+of\s+"
+    r"(?:weather-related\s+)?disruptions?\b"
+    r"|\bweather-related\s+disruptions?\b"
+    r"|\bcontribut(?:e|es|ing)\s+to\b"
+    r"(?:\s+\w+){0,8}\s+"
+    r"(?:disruptions?|disruption\s+risks?)\b"
+    r"|\b(?:cause|causes|explain|explains|prove|proves)\b"
+    r"(?:\s+\w+){0,12}\s+"
+    r"(?:operational\s+|weather\s+)?disruption\s+risks?\b"
+    r"|\bhigh[-\s]precipitation\s+and\s+high[-\s]wind\s+events?\b"
+    r"|\bhigh[-\s]wind\s+and\s+high[-\s]precipitation\s+events?\b"
+    r"|\b(?:high[-\s]precipitation|high[-\s]wind)\s+events?\b"
+    r"|\bweather\s+incidents?\b"
+    r"|\bprone\s+to\b(?:\s+\w+){0,6}\s+incidents?\b"
+    r"|\b(?:can|could|may)\s+disrupt\s+operations\b"
+    r"|\bdisrupt(?:s|ing)?\s+operations\b",
+    re.IGNORECASE,
+)
+
+# Declarations are not incident counts. "incident frequency" in a
+# disclaimer does not match these phrases.
+INCIDENT_OVERCLAIM = re.compile(
+    r"\bhurricane\s+incident\s+counts?\b"
+    r"|\b(?:higher|more|greater)\s+hurricane\s+incidents?\b"
+    r"|\b(?:flood|hurricane|disaster)\s+incidents?\b",
+    re.IGNORECASE,
+)
+
+_DISCLAIMER = re.compile(
+    r"\b(not|never|no|n't|cannot|can't|rather than|instead of|without)\b",
+    re.IGNORECASE,
+)
+
+UNRELATED_HUBS = (
+    "denver",
+    "dallas",
+    "chicago",
+    "minneapolis",
+    "detroit",
+    "st. louis",
+)
+
 
 def load_suite() -> dict:
     return json.loads(CASES_PATH.read_text())
@@ -242,14 +332,42 @@ def combined_answer_text(output: dict) -> str:
     return "\n".join(str(part) for part in parts)
 
 
-def _negated(text: str, match: re.Match) -> bool:
-    window = text[max(0, match.start() - 50):match.start()]
-    return re.search(r"\b(not|never|no|n't)\b", window, re.IGNORECASE) is not None
+def _is_disclaimed(text: str, start: int, window: int = 160) -> bool:
+    prefix = text[max(0, start - window):start]
+    return _DISCLAIMER.search(prefix) is not None
+
+
+def _has_undisclaimed(text: str, pattern: re.Pattern) -> bool:
+    for match in pattern.finditer(text):
+        if not _is_disclaimed(text, match.start()):
+            return True
+
+    return False
+
+
+def _has_flood_event_overclaim(text: str) -> bool:
+    """Fail event-frequency or severity claims, not negated metric caveats."""
+    return _has_undisclaimed(text, FLOOD_EVENT_OVERCLAIM)
+
+
+def _has_precip_event_rename(text: str) -> bool:
+    """Fail event-category renames of high-precipitation days."""
+    return _has_undisclaimed(text, PRECIP_EVENT_RENAME)
+
+
+def _has_outcome_overclaim(text: str) -> bool:
+    """Fail claims that proxies prove impact, severity, or disruption."""
+    return _has_undisclaimed(text, OUTCOME_OVERCLAIM)
+
+
+def _has_incident_overclaim(text: str) -> bool:
+    """Fail wording that turns declarations into incident counts."""
+    return _has_undisclaimed(text, INCIDENT_OVERCLAIM)
 
 
 def _has_positive_claim(text: str, pattern: str) -> bool:
     for match in re.finditer(pattern, text, re.IGNORECASE):
-        if not _negated(text, match):
+        if not _is_disclaimed(text, match.start()):
             return True
 
     return False
@@ -306,6 +424,34 @@ def _expected_behavior(expect: dict) -> str:
         parts.append(
             "each turn uses Denver and Dallas via ranking or hub reports"
         )
+
+    if expect.get("comparison_cities"):
+        parts.append(
+            "compare "
+            + " and ".join(expect["comparison_cities"])
+            + " for hurricane and flood via reports or rankings"
+        )
+
+    if expect.get("forbid_flood_event_claims"):
+        parts.append("no flood frequency or severity overclaim")
+
+    if expect.get("forbid_precip_event_rename"):
+        parts.append("no heavy-precipitation event rename")
+
+    if expect.get("forbid_outcome_overclaims"):
+        parts.append("no disruption, impact, or future-event overclaim")
+
+    if expect.get("context_cities"):
+        parts.append(
+            "preserve "
+            + " and ".join(expect["context_cities"])
+        )
+
+    if expect.get("flood_metric_grounding"):
+        parts.append("final answer stays on precipitation and flood declarations")
+
+    if expect.get("disruption_limitation"):
+        parts.append("states that disruption risk is not directly measured")
 
     return "; ".join(parts) or "wording and schema"
 
@@ -374,6 +520,19 @@ def _check_tools(calls: list[dict], expect: dict) -> list[str]:
             failures.append(
                 f"get_hub_exposure_report was not called for {city}"
             )
+        elif expect.get("report_state_required"):
+            required_state = expect["report_state_required"].strip().lower()
+            state_matches = [
+                call
+                for call in matches
+                if (call["arguments"].get("state") or "").strip().lower()
+                == required_state
+            ]
+            if not state_matches:
+                failures.append(
+                    f"get_hub_exposure_report for {city} did not use "
+                    f"state {expect['report_state_required']}"
+                )
 
     if expect.get("previous_calendar_year"):
         start_date, end_date = previous_calendar_year()
@@ -505,6 +664,231 @@ def _check_context_turns(
     return failures
 
 
+def _float_tokens(text: str) -> list[float]:
+    return [
+        float(token)
+        for token in re.findall(r"\d+(?:\.\d+)?", text)
+    ]
+
+
+def _value_present(text: str, value: float) -> bool:
+    return any(
+        abs(token - float(value)) < 1e-6
+        for token in _float_tokens(text)
+    )
+
+
+def _declaration_count_stated(
+    text: str,
+    city: str,
+    hazard: str,
+    count: float,
+) -> bool:
+    """Require the numeric count, except zero may be stated as an absence."""
+    if float(count) != 0.0:
+        return _value_present(text, count)
+
+    if _value_present(text, 0):
+        return True
+
+    city_name = _city_key(city)
+    hazard_name = hazard.strip().lower()
+    absence = re.compile(r"\b(?:zero|none|no)\b", re.IGNORECASE)
+
+    for sentence in re.split(r"[.\n]+", text):
+        lowered = sentence.lower()
+        if city_name not in lowered or hazard_name not in lowered:
+            continue
+        if "declaration" not in lowered:
+            continue
+        if absence.search(sentence):
+            return True
+
+    return False
+
+
+def _result_error(result: object) -> bool:
+    return isinstance(result, dict) and "error" in result
+
+
+def _exact_cities(arguments: dict, expected: set[str]) -> bool:
+    return _city_set(list(_cities(arguments))) == expected
+
+
+def _check_hurricane_flood_comparison(
+    calls: list[dict],
+    output: dict | None,
+    expect: dict,
+) -> list[str]:
+    """Accept reports or rankings that cover hurricane and flood for the cities."""
+    failures = []
+    expected = _city_set(expect["comparison_cities"])
+    report_calls = []
+    hurricane_rank_calls = []
+    flood_rank_calls = []
+
+    for call in _calls_named(calls, "get_hub_exposure_report"):
+        arguments = call["arguments"]
+        city = arguments.get("city")
+        key = _city_key(city)
+
+        if key not in expected:
+            failures.append(
+                f"analysis included an unrelated hub report for {city}"
+            )
+            continue
+
+        if not _state_is_acceptable(city, arguments.get("state")):
+            failures.append(
+                f"unexpected state for {city}: {arguments.get('state')}"
+            )
+
+        if not _result_error(call.get("result")):
+            report_calls.append(call)
+
+    for call in _calls_named(calls, "rank_hubs_by_exposure"):
+        arguments = call["arguments"]
+        actual = _city_set(list(_cities(arguments)))
+
+        if actual - expected:
+            failures.append(
+                "ranking included an unrelated hub: "
+                + ", ".join(sorted(actual - expected))
+            )
+            continue
+
+        for hub in arguments.get("hubs") or []:
+            if not _state_is_acceptable(hub.get("city"), hub.get("state")):
+                failures.append(
+                    f"unexpected state for {hub.get('city')}: "
+                    f"{hub.get('state')}"
+                )
+
+        if not _exact_cities(arguments, expected):
+            continue
+
+        if _result_error(call.get("result")):
+            continue
+
+        hazard = arguments.get("hazard")
+        if hazard == "hurricane":
+            hurricane_rank_calls.append(call)
+        elif hazard == "flood":
+            flood_rank_calls.append(call)
+
+    reported = {
+        _city_key(call["arguments"].get("city"))
+        for call in report_calls
+    }
+    reports_cover = reported == expected
+    hurricane_covered = reports_cover or bool(hurricane_rank_calls)
+    flood_covered = reports_cover or bool(flood_rank_calls)
+
+    if not hurricane_covered:
+        failures.append(
+            "hurricane exposure was not retrieved from hub reports "
+            "or a hurricane ranking of "
+            + " and ".join(expect["comparison_cities"])
+        )
+
+    if not flood_covered:
+        failures.append(
+            "flood exposure was not retrieved from hub reports "
+            "or a flood ranking of "
+            + " and ".join(expect["comparison_cities"])
+        )
+
+    if output is None:
+        failures.append("final output is missing")
+        return failures
+
+    text = combined_answer_text(output)
+    lowered = text.lower()
+
+    for city in expect["comparison_cities"]:
+        if _city_key(city) not in lowered:
+            failures.append(f"answer does not discuss {city}")
+
+    if "hurricane" not in lowered:
+        failures.append("answer does not address hurricane exposure")
+
+    if "flood" not in lowered and "precipitation" not in lowered:
+        failures.append("answer does not address flood exposure")
+
+    if "declaration" not in lowered:
+        failures.append(
+            "answer does not describe hurricane counts as declarations"
+        )
+
+    if _has_positive_claim(text, r"hurricanes?\s+hit"):
+        failures.append("answer claims hurricanes hit the location")
+
+    if reports_cover:
+        missing_hurricane_counts = [
+            call["arguments"].get("city")
+            for call in report_calls
+            if not _declaration_count_stated(
+                text,
+                call["arguments"].get("city") or "",
+                "hurricane",
+                float(
+                    call["result"]["fema_major_disaster_declarations"][
+                        "counts"
+                    ]["hurricane"]
+                ),
+            )
+        ]
+        if missing_hurricane_counts:
+            failures.append(
+                "answer does not use the FEMA hurricane declaration "
+                "counts returned by the hub reports"
+            )
+
+        for call in report_calls:
+            precip = call["result"]["weather_exposure"]["high_precipitation"]
+            options = {
+                float(precip["high_precipitation_days"]),
+                float(precip["average_days_per_year"]),
+                float(precip["high_precipitation_days_percentage"]),
+            }
+            if not any(_value_present(text, value) for value in options):
+                failures.append(
+                    "answer does not use the high-precipitation metric "
+                    f"returned for {call['arguments'].get('city')}"
+                )
+    elif hurricane_rank_calls:
+        for call in hurricane_rank_calls:
+            missing = [
+                hub.get("city")
+                for hub in call["result"].get("hubs") or []
+                if not _declaration_count_stated(
+                    text,
+                    hub.get("city") or "",
+                    "hurricane",
+                    float(hub["value"]),
+                )
+            ]
+            if missing:
+                failures.append(
+                    "answer does not use the hurricane ranking values"
+                )
+                break
+
+    if not reports_cover and flood_rank_calls:
+        for call in flood_rank_calls:
+            values = [
+                float(hub["value"])
+                for hub in call["result"].get("hubs") or []
+            ]
+            if not all(_value_present(text, value) for value in values):
+                failures.append(
+                    "answer does not use the flood ranking values"
+                )
+                break
+
+    return failures
+
+
 def _check_ranked_cities(
     call: dict,
     expect: dict,
@@ -545,6 +929,111 @@ def _check_ranked_cities(
     return failures
 
 
+def _states_disruption_limitation(text: str) -> bool:
+    targets = re.compile(
+        r"operational disruption|operational impact|shutdown probability|"
+        r"shutdown(?:\s+or\s+disruption)?\s+likelihood|"
+        r"disruption likelihood|disruption risk|operational[-\s]risk|"
+        r"future risk|future predictions|future disruptions|shutdowns",
+        re.IGNORECASE,
+    )
+    for match in targets.finditer(text):
+        window = text[max(0, match.start() - 80):match.end() + 40]
+        if _DISCLAIMER.search(window):
+            return True
+
+    return False
+
+
+def _check_overclaim_flags(text: str, expect: dict) -> list[str]:
+    failures = []
+
+    if expect.get("forbid_flood_event_claims") and _has_flood_event_overclaim(text):
+        failures.append(
+            "answer treats high-precipitation days or FEMA declarations "
+            "as flood frequency or severity"
+        )
+
+    if expect.get("forbid_flood_event_claims") and _has_incident_overclaim(text):
+        failures.append(
+            "answer converts declarations into incident counts"
+        )
+
+    if expect.get("forbid_precip_event_rename") and _has_precip_event_rename(text):
+        failures.append(
+            "answer renames high-precipitation days as a weather event "
+            "category"
+        )
+
+    if expect.get("forbid_outcome_overclaims") and _has_outcome_overclaim(text):
+        failures.append(
+            "answer treats proxy metrics as operational disruption, "
+            "physical impact, or future disruption"
+        )
+
+    return failures
+
+
+def _check_context_cities(
+    turn_calls: list[list[dict]],
+    expect: dict,
+) -> list[str]:
+    """Allow reports or a flood ranking, and reject unrelated hubs."""
+    expected = _city_set(expect["context_cities"])
+    failures = []
+    covered = False
+
+    for index, calls in enumerate(turn_calls, start=1):
+        reported = set()
+
+        for call in _calls_named(calls, "get_hub_exposure_report"):
+            city = call["arguments"].get("city")
+            key = _city_key(city)
+
+            if key not in expected:
+                failures.append(
+                    f"turn {index} included an unrelated hub report for {city}"
+                )
+                continue
+
+            if not _state_is_acceptable(city, call["arguments"].get("state")):
+                failures.append(
+                    f"turn {index} has an unexpected state for {city}"
+                )
+
+            if not _result_error(call.get("result")):
+                reported.add(key)
+
+        for call in _calls_named(calls, "rank_hubs_by_exposure"):
+            arguments = call["arguments"]
+            actual = _city_set(list(_cities(arguments)))
+
+            if actual - expected:
+                failures.append(
+                    f"turn {index} ranking included an unrelated hub: "
+                    + ", ".join(sorted(actual - expected))
+                )
+                continue
+
+            if (
+                not _result_error(call.get("result"))
+                and actual == expected
+                and arguments.get("hazard") == "flood"
+            ):
+                covered = True
+
+        if reported == expected:
+            covered = True
+
+    if not covered:
+        failures.append(
+            "high-precipitation and FEMA flood context were not retrieved "
+            "for " + " and ".join(expect["context_cities"])
+        )
+
+    return failures
+
+
 def _check_wording(output: dict, expect: dict) -> list[str]:
     text = combined_answer_text(output)
     failures = []
@@ -568,6 +1057,67 @@ def _check_wording(output: dict, expect: dict) -> list[str]:
                 "answer does not describe FEMA declarations naming "
                 "the county by primary hurricane incident type"
             )
+
+    failures.extend(_check_overclaim_flags(text, expect))
+
+    if expect.get("historical_exposure_explanation"):
+        lowered = text.lower()
+        if "dallas" not in lowered or "exposure" not in lowered:
+            failures.append(
+                "answer does not explain Dallas using historical "
+                "weather exposure"
+            )
+        elif not any(
+            word in lowered
+            for word in (
+                "historical",
+                "weather",
+                "elevated",
+                "precipitation",
+                "snow",
+                "wind",
+            )
+        ):
+            failures.append(
+                "answer does not explain Dallas using historical "
+                "weather exposure"
+            )
+
+    if expect.get("disruption_limitation"):
+        if not _states_disruption_limitation(text):
+            failures.append(
+                "answer does not say that operational disruption risk "
+                "or shutdown probability is not directly measured"
+            )
+
+    if expect.get("flood_metric_grounding"):
+        lowered = text.lower()
+        for city in expect.get("context_cities") or []:
+            if _city_key(city) not in lowered:
+                failures.append(f"answer does not discuss {city}")
+
+        if not (
+            "high-precipitation" in lowered
+            or "high precipitation" in lowered
+            or "precipitation exposure" in lowered
+            or "precipitation days" in lowered
+        ):
+            failures.append(
+                "answer does not ground flood exposure in "
+                "high-precipitation days or precipitation exposure"
+            )
+
+        if "flood" not in lowered or not (
+            "declaration" in lowered or "fema" in lowered
+        ):
+            failures.append(
+                "answer does not ground flood exposure in "
+                "FEMA Flood declarations"
+            )
+
+        for hub in UNRELATED_HUBS:
+            if hub in lowered:
+                failures.append(f"answer introduced an unrelated hub: {hub}")
 
     if expect.get("no_score"):
         if re.search(r"\b\d{1,3}\s*/\s*100\b", text):
@@ -686,6 +1236,15 @@ def run_case(case: dict, suite: dict) -> dict:
 
         if outputs:
             failures.extend(_check_wording(outputs[-1], expect))
+            if expect.get("overclaims_each_turn"):
+                for output in outputs[:-1]:
+                    if output:
+                        failures.extend(
+                            _check_overclaim_flags(
+                                combined_answer_text(output),
+                                expect,
+                            )
+                        )
     elif expect.get("no_fabricated_metrics") and outputs:
         failures.extend(_check_wording(outputs[-1], expect))
 
@@ -699,12 +1258,34 @@ def run_case(case: dict, suite: dict) -> dict:
             )
         )
 
+    if expect.get("comparison_cities"):
+        failures.extend(
+            _check_hurricane_flood_comparison(
+                executor.calls,
+                outputs[-1] if outputs else None,
+                expect,
+            )
+        )
+
+    if expect.get("context_cities"):
+        failures.extend(
+            _check_context_cities(
+                turn_calls,
+                expect,
+            )
+        )
+
     return {
         "name": case["name"],
         "passed": not failures,
         "expected": _expected_behavior(expect),
         "calls": executor.calls,
         "failures": failures,
+        "answer_texts": [
+            combined_answer_text(output)
+            for output in outputs
+            if output
+        ],
     }
 
 
@@ -750,6 +1331,11 @@ def main() -> None:
                 else "; ".join(result["failures"])
             )
         )
+        if result["failures"] and result.get("answer_texts"):
+            print("Model answers:")
+            for index, text in enumerate(result["answer_texts"], start=1):
+                print(f"--- turn {index} ---")
+                print(text)
         print()
 
     print(f"{passed}/{len(results)} passed")

@@ -119,6 +119,52 @@
       }
     },
     {
+      "name": "assignment_miami_houston_hurricane_flood",
+      "default": true,
+      "turns": [
+        "Compare Miami and Houston in terms of hurricane and flood exposure."
+      ],
+      "expect": {
+        "comparison_cities": ["Miami", "Houston"],
+        "no_score": true,
+        "forbid_flood_event_claims": true,
+        "forbid_precip_event_rename": true,
+        "forbid_outcome_overclaims": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "dallas_disruption_risk_wording",
+      "default": true,
+      "turns": ["Why is the Dallas hub's weather disruption risk high?"],
+      "expect": {
+        "required_tools": ["get_hub_exposure_report"],
+        "report_city": "Dallas",
+        "report_state_required": "Texas",
+        "historical_exposure_explanation": true,
+        "disruption_limitation": true,
+        "forbid_outcome_overclaims": true,
+        "schema": true
+      }
+    },
+    {
+      "name": "followup_miami_houston_flood_why",
+      "default": true,
+      "turns": [
+        "Compare Miami and Houston in terms of hurricane and flood exposure.",
+        "Which one has higher flood exposure, and why?"
+      ],
+      "expect": {
+        "context_cities": ["Miami", "Houston"],
+        "flood_metric_grounding": true,
+        "forbid_flood_event_claims": true,
+        "forbid_precip_event_rename": true,
+        "forbid_outcome_overclaims": true,
+        "overclaims_each_turn": true,
+        "schema": true
+      }
+    },
+    {
       "name": "tool_error_recovery",
       "default": false,
       "turns": ["Give me the weather exposure profile for Denver."],
