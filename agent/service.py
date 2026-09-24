@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from agent.prompts import build_system_prompt
+from agent.schemas import AgentAnswer
 from agent.tools import TOOL_DEFINITIONS, execute_tool
 
 
@@ -63,7 +64,10 @@ def run_agent(
         if previous_id:
             request["previous_response_id"] = previous_id
 
-        response = client.responses.create(**request)
+        response = client.responses.parse(
+            **request,
+            text_format=AgentAnswer,
+        )
         previous_id = response.id
 
         calls = [
@@ -73,9 +77,15 @@ def run_agent(
         ]
 
         if not calls:
+            answer = response.output_parsed
+            if answer is None:
+                raise RuntimeError(
+                    "Model response did not include a parsed final answer."
+                )
+
             return {
                 "response_id": response.id,
-                "output_text": response.output_text,
+                "output": answer.model_dump(),
             }
 
         current_input = [
