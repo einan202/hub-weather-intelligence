@@ -302,6 +302,11 @@ def _expected_behavior(expect: dict) -> str:
     if expect.get("error_fixture"):
         parts.append("tool error fixture")
 
+    if expect.get("context_turns"):
+        parts.append(
+            "each turn uses Denver and Dallas via ranking or hub reports"
+        )
+
     return "; ".join(parts) or "wording and schema"
 
 
@@ -421,6 +426,81 @@ def _check_tools(calls: list[dict], expect: dict) -> list[str]:
                 failures.extend(
                     _check_ranked_cities(call, expect, calls)
                 )
+
+    return failures
+
+
+def _city_set(cities: list[str]) -> set[str]:
+    return {_city_key(city) for city in cities}
+
+
+def _check_context_turns(
+    turn_calls: list[list[dict]],
+    turns: list[dict],
+) -> list[str]:
+    if len(turn_calls) != len(turns):
+        return ["context turns did not all complete"]
+
+    failures = []
+
+    for index, (calls, turn) in enumerate(zip(turn_calls, turns), start=1):
+        expected = _city_set(turn["cities"])
+        hazard = turn["hazard_if_ranked"]
+        rank_calls = _calls_named(calls, "rank_hubs_by_exposure")
+        report_calls = _calls_named(calls, "get_hub_exposure_report")
+        ranked_ok = False
+        reported_cities = set()
+
+        if not rank_calls and not report_calls:
+            failures.append(
+                f"turn {index} did not use ranking or hub reports"
+            )
+            continue
+
+        for call in rank_calls:
+            arguments = call["arguments"]
+            actual = _city_set(list(_cities(arguments)))
+
+            if arguments.get("hazard") != hazard:
+                failures.append(
+                    f"turn {index} ranking hazard was "
+                    f"{arguments.get('hazard')}, expected {hazard}"
+                )
+
+            if actual != expected:
+                failures.append(
+                    f"turn {index} ranked {sorted(actual)}, "
+                    f"expected {sorted(expected)}"
+                )
+            else:
+                ranked_ok = arguments.get("hazard") == hazard
+
+            for hub in arguments.get("hubs") or []:
+                if not _state_is_acceptable(hub.get("city"), hub.get("state")):
+                    failures.append(
+                        f"turn {index} has an unexpected state for "
+                        f"{hub.get('city')}"
+                    )
+
+        for call in report_calls:
+            city = call["arguments"].get("city")
+            reported_cities.add(_city_key(city))
+
+            if not _state_is_acceptable(city, call["arguments"].get("state")):
+                failures.append(
+                    f"turn {index} has an unexpected state for {city}"
+                )
+
+        if reported_cities - expected:
+            failures.append(
+                f"turn {index} included an unrelated hub report"
+            )
+
+        if not ranked_ok and reported_cities != expected:
+            failures.append(
+                f"turn {index} did not cover {sorted(expected)} "
+                "with ranking or hub reports"
+            )
 
     return failures
 
@@ -556,10 +636,12 @@ def run_case(case: dict, suite: dict) -> dict:
         use_error_fixture=bool(expect.get("error_fixture")),
     )
     outputs = []
+    turn_calls = []
     previous_response_id = None
     controlled_failure = None
 
     for turn in case["turns"]:
+        call_count = len(executor.calls)
         try:
             with patch("agent.service.execute_tool", executor):
                 result = run_agent(
@@ -584,6 +666,7 @@ def run_case(case: dict, suite: dict) -> dict:
 
         previous_response_id = result.get("response_id")
         outputs.append(result.get("output"))
+        turn_calls.append(executor.calls[call_count:])
 
         if previous_response_id is None and turn != case["turns"][-1]:
             return {
@@ -607,6 +690,14 @@ def run_case(case: dict, suite: dict) -> dict:
         failures.extend(_check_wording(outputs[-1], expect))
 
     failures.extend(_check_tools(executor.calls, expect))
+
+    if expect.get("context_turns"):
+        failures.extend(
+            _check_context_turns(
+                turn_calls,
+                expect["context_turns"],
+            )
+        )
 
     return {
         "name": case["name"],

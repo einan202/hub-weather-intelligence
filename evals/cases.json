@@ -105,9 +105,16 @@
         "What about flood exposure?"
       ],
       "expect": {
-        "tool_sequence": ["rank_hubs_by_exposure", "rank_hubs_by_exposure"],
-        "ranking_hazards": ["overall", "flood"],
-        "cities": ["Denver", "Dallas"],
+        "context_turns": [
+          {
+            "cities": ["Denver", "Dallas"],
+            "hazard_if_ranked": "overall"
+          },
+          {
+            "cities": ["Denver", "Dallas"],
+            "hazard_if_ranked": "flood"
+          }
+        ],
         "schema": true
       }
     },
