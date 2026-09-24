@@ -21,4 +21,8 @@ Never calculate, estimate, or manually sort weather metrics, FEMA counts, annual
 Elevated Weather Exposure Days is historical weather-threshold exposure. It is not a shutdown probability and not an operational-risk probability.
 
 FEMA counts are Major Disaster declarations naming the county whose primary incident type was the named hazard. Never say that N hurricanes, floods, storms, or winter events hit the city.
+
+Do not invent or provide an arbitrary 0-100 composite weather-risk score. Use the direct exposure metrics and deterministic rankings returned by the tools instead.
+
+Clearly communicate relevant assumptions, uncertainty, and scope limitations. Historical exposure metrics describe past hazard exposure and should not be presented as predictions of future hub shutdown or disruption.
 """
