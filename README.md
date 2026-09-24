@@ -11,7 +11,7 @@ The current deterministic layer combines two complementary public data sources:
 1. Historical daily weather exposure from Open-Meteo.
 2. Historical FEMA Major Disaster declarations from OpenFEMA.
 
-The LLM layer will use these deterministic tools to answer natural-language questions, compare hubs, explain drivers, and support conversational follow-ups.
+The LLM layer uses these deterministic tools to answer natural-language questions, compare hubs, explain drivers, and support conversational follow-ups.
 
 A key design decision is that the system does **not** create an arbitrary 0-100 risk score. The available public data does not provide facility-level shutdown or downtime labels that would justify calibrating weights, normalization constants, or a probability of operational disruption.
 
@@ -566,7 +566,105 @@ The ranking logic is deterministic and reproducible.
 
 ---
 
+## LLM Agent
+
+The agent uses the OpenAI Responses API. It calls three high-level tools:
+
+- `get_hubs`
+- `get_hub_exposure_report`
+- `rank_hubs_by_exposure`
+
+The model's final message is a structured `AgentAnswer`:
+
+- `answer`
+- `key_findings`
+- `limitations`
+
+A follow-up question is sent with the previous turn's `previous_response_id`. The LLM selects tools and explains their results. It does not calculate deterministic weather metrics, FEMA counts, annualized values, or rankings.
+
+---
+
+## FastAPI
+
+`GET /health` returns:
+
+```json
+{"status": "ok"}
+```
+
+`POST /chat` accepts:
+
+```json
+{
+  "message": "string",
+  "previous_response_id": "string or null"
+}
+```
+
+The endpoint calls `run_agent()` and returns `response_id` plus the `AgentAnswer`.
+
+---
+
+## Streamlit
+
+Streamlit is the chat frontend. It sends each message to the FastAPI `POST /chat` endpoint over HTTP. It does not call `run_agent` directly.
+
+---
+
+## Environment Variables
+
+```text
+OPENAI_API_KEY=
+OPENAI_MODEL=
+API_BASE_URL=
+```
+
+If `OPENAI_MODEL` is unset, the agent uses `gpt-4.1-mini`. If `API_BASE_URL` is unset, Streamlit uses `http://127.0.0.1:8000`.
+
+---
+
+## Local Run
+
+```bash
+pip install -r requirements.txt
+```
+
+Start the API:
+
+```bash
+uvicorn app:app --reload
+```
+
+In another terminal, start the chat UI:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+---
+
 ## Current Architecture
+
+```text
+User
+    |
+    v
+Streamlit
+    |
+    v
+FastAPI
+    |
+    v
+LLM Agent
+    |
+    v
+Deterministic tools
+    |
+    v
+Open-Meteo / OpenFEMA
+```
+
+The deterministic tool path is:
 
 ```text
 User query
@@ -623,8 +721,10 @@ Coverage includes:
 The current full suite has been verified with:
 
 ```text
-28 passed
+45 passed
 ```
+
+That count includes the deterministic coverage above plus the agent tool dispatcher, `AgentAnswer` schema, and FastAPI chat endpoint.
 
 Run the full suite with:
 
@@ -654,6 +754,17 @@ Because the historical cache is process-local, an immediate full rerun after a f
 
 ---
 
+## Agent Behavior Evaluations
+
+```bash
+python -m evals.run_evals
+python -m evals.run_evals --case catalog_midwest
+```
+
+These evaluations call the real OpenAI agent. Deterministic tool execution is replaced with local fixtures, so the evals do not call Open-Meteo or OpenFEMA. They check tool choice, arguments, multi-step orchestration, relative dates, FEMA wording, the absence of an invented composite score, and conversational context.
+
+---
+
 ## Current Scope
 
 ### Implemented
@@ -674,15 +785,15 @@ Because the historical cache is process-local, an immediate full rerun after a f
 - Cross-provider county normalization
 - High-level hub exposure report
 - Deterministic multi-hub ranking
+- LLM tool calling through the OpenAI Responses API
+- Structured `AgentAnswer` output
+- FastAPI chat endpoint
+- Streamlit chat interface
+- Agent behavior evaluation suite
 - Unit tests and live API sanity checks
 
 ### Still to implement
 
-- LLM tool-calling layer
-- Structured LLM output schema
-- FastAPI chat endpoint
-- Streamlit chat interface
-- Small evaluation set and evaluation runner
 - Deployment, if time permits
 
 The project intentionally prioritizes a narrow, explainable implementation over a broader but less reliable system.
