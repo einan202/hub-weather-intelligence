@@ -27,3 +27,11 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+      - name: Deploy backend
+        if: github.ref == 'refs/heads/main'
+        run: curl -fsS "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}"
+
+      - name: Deploy frontend
+        if: github.ref == 'refs/heads/main'
+        run: curl -fsS "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}"
