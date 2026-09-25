@@ -19,6 +19,16 @@ A key design decision is that the system does **not** create an arbitrary 0-100 
 
 
 
+## Live Demo
+
+https://hub-weather-agent.onrender.com
+
+The application is deployed on Render using separate FastAPI and Streamlit web services.
+
+---
+
+
+
 ## Data Sources and Tools
 
 
@@ -467,6 +477,8 @@ State that the current system measures historical weather and hazard exposure, n
 
 Then answer the user's underlying question by explaining the relevant historical exposure indicators returned by the deterministic tools.
 
+A risk-framed question is not a reason to avoid tool use. If the user names a hub and asks why its weather risk or disruption risk is high, briefly state that operational disruption risk and shutdown probability are not directly measured, immediately call get_hub_exposure_report for that hub, and explain the returned historical exposure indicators. Do not respond only with a conceptual disclaimer. Do not ask whether the user wants the exposure data; retrieve it directly.
+
 Do not describe exposure metrics, FEMA declarations, or historical hazard indicators as proving:
 - operational disruption risk
 - shutdown likelihood
@@ -493,6 +505,14 @@ Do not convert high-precipitation days into "heavy precipitation events", "more 
 Do not invent or provide an arbitrary 0-100 composite weather-risk score. Use the direct exposure metrics and deterministic rankings returned by the tools instead.
 
 Clearly communicate relevant assumptions, uncertainty, and scope limitations. Historical exposure metrics describe past hazard exposure and should not be presented as predictions of future hub shutdown or disruption.
+
+Treat weather metrics and FEMA declaration counts as independent fields. Never infer a weather metric value from a FEMA declaration count, or vice versa. A value of 0 FEMA Flood declarations does not imply 0 high-precipitation days.
+
+Preserve numeric values exactly as returned by the deterministic tools. Repeated references to the same metric must remain numerically consistent across answer, key_findings, and limitations.
+
+When comparing high-precipitation days, describe only "more high-precipitation days", "fewer high-precipitation days", "higher high-precipitation-day exposure", or "lower high-precipitation-day exposure". High-precipitation days are days above the configured precipitation threshold. They are not distinct precipitation events and not flood events.
+
+Never translate this metric into more frequent precipitation events, more intense precipitation events, more frequent or intense rainfall, greater flood frequency, more flooding, or more severe flooding.
 ```
 
 The structured `AgentAnswer` schema is enforced separately from the prompt and requires `answer`, `key_findings`, and `limitations`.
@@ -527,6 +547,8 @@ The endpoint calls `run_agent()` and returns `response_id` plus the `AgentAnswer
 ## Streamlit
 
 Streamlit is the chat frontend. It sends each message to the FastAPI `POST /chat` endpoint over HTTP. It does not call `run_agent` directly.
+
+The UI allows one active request at a time to preserve conversational context and prevent overlapping submissions.
 
 ---
 
@@ -617,7 +639,7 @@ Low-level API and calculation helpers remain internal. The agent should only be 
 ## Repository Structure
 
 ```text
-weather-investment-agent/
+hub-weather-intelligence/
 ├── agent/                # LLM orchestration, prompts, schemas, and tool adapters
 ├── tools/                # Deterministic geocoding, weather, FEMA, reporting, and ranking logic
 ├── evals/                # Agent behavior evaluation cases and runner
@@ -761,11 +783,10 @@ python -m evals.run_evals --case tool_error_recovery
 
 ## Current Scope
 
-The MVP is a local historical weather- and hazard-exposure system: deterministic metrics and rankings, an LLM agent over those tools, a FastAPI chat endpoint, and a Streamlit UI.
+The MVP is a historical weather- and hazard-exposure system: deterministic metrics and rankings, an LLM agent over those tools, a FastAPI chat endpoint, and a Streamlit UI.
 
 ### Optional / Not Implemented
 
-- Hosted deployment. The application is fully runnable locally; deployment was left out of the MVP.
 - Scheduled or webhook-triggered risk alerts were left out because they are a bonus requirement rather than part of the core MVP.
 
 The project intentionally prioritizes a narrow, explainable implementation over a broader but less reliable system.

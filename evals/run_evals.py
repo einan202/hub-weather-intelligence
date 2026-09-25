@@ -56,6 +56,7 @@ FLOOD_EVENT_OVERCLAIM = re.compile(
     r"(?:frequency|intensity|severity)\b"
     r"|\b(?:higher|greater)\s+(?:frequency|intensity|severity)\s+"
     r"of\s+floods\b"
+    r"|\bmore\s+flooding\b"
     r"|\bmore\s+flooding\s+incidents\b"
     r"|\bmore\s+flood\s+incidents\b"
     r"|\b(?:greater|higher|more)\s+flood\s+impact\b"
@@ -68,7 +69,10 @@ PRECIP_EVENT_RENAME = re.compile(
     r"\bhigh[-\s]precipitation\s+events?\b"
     r"|\bheavy\s+(?:precipitation|precip|rain|rainfall)\s+events?\b"
     r"|\b(?:extreme|severe|intense)\s+"
-    r"(?:precipitation|rain|rainfall)\s+events?\b",
+    r"(?:precipitation|rain|rainfall)\s+events?\b"
+    r"|\bmore\s+frequent\s+(?:precipitation|precip|rain|rainfall)\s+events?\b"
+    r"|\bmore\s+frequent\s+or\s+intense\s+"
+    r"(?:precipitation|rain|rainfall)\b",
     re.IGNORECASE,
 )
 
@@ -363,6 +367,69 @@ def _has_outcome_overclaim(text: str) -> bool:
 def _has_incident_overclaim(text: str) -> bool:
     """Fail wording that turns declarations into incident counts."""
     return _has_undisclaimed(text, INCIDENT_OVERCLAIM)
+
+
+_ZERO_HIGH_PRECIP_DAYS = re.compile(
+    r"\b(?:zero|no|0)\s+high[-\s]precipitation\s+days\b",
+    re.IGNORECASE,
+)
+
+
+def _claims_zero_high_precip(text: str, city: str) -> bool:
+    """Fail a zero-day claim tied to a city, not a negated caveat."""
+    city_re = re.compile(
+        rf"\b{re.escape(_city_key(city))}\b",
+        re.IGNORECASE,
+    )
+    for match in _ZERO_HIGH_PRECIP_DAYS.finditer(text):
+        if _is_disclaimed(text, match.start()):
+            continue
+        window = text[max(0, match.start() - 80):match.start()]
+        if city_re.search(window):
+            return True
+    return False
+
+
+def _check_nonzero_precip_not_called_zero(
+    calls: list[dict],
+    outputs: list[dict | None],
+) -> list[str]:
+    """Reject zero high-precipitation days when the hub report is non-zero."""
+    returned = {}
+
+    for call in calls:
+        if call.get("name") != "get_hub_exposure_report":
+            continue
+
+        result = call.get("result") or {}
+        if _result_error(result):
+            continue
+
+        precip = (
+            result.get("weather_exposure") or {}
+        ).get("high_precipitation") or {}
+        annual = precip.get("average_days_per_year")
+        city = (call.get("arguments") or {}).get("city")
+        if annual is None or not city or float(annual) == 0.0:
+            continue
+
+        returned[_city_key(city)] = (city, float(annual))
+
+    failures = []
+    texts = [
+        combined_answer_text(output)
+        for output in outputs
+        if output
+    ]
+
+    for city, annual in returned.values():
+        if any(_claims_zero_high_precip(text, city) for text in texts):
+            failures.append(
+                f"answer says {city} has zero high-precipitation days "
+                f"although the hub report returned {annual:g} per year"
+            )
+
+    return failures
 
 
 def _has_positive_claim(text: str, pattern: str) -> bool:
@@ -1236,6 +1303,15 @@ def run_case(case: dict, suite: dict) -> dict:
 
         if outputs:
             failures.extend(_check_wording(outputs[-1], expect))
+            if expect.get("flood_metric_grounding") or expect.get(
+                "comparison_cities"
+            ):
+                failures.extend(
+                    _check_nonzero_precip_not_called_zero(
+                        executor.calls,
+                        outputs,
+                    )
+                )
             if expect.get("overclaims_each_turn"):
                 for output in outputs[:-1]:
                     if output:
