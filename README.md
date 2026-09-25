@@ -715,6 +715,29 @@ Manual end-to-end validation was performed through the Streamlit UI, FastAPI bac
 
 
 
+## CI/CD
+
+GitHub Actions runs the pytest suite automatically on pushes and pull requests to `main`.
+
+If the CI checks pass, Render automatically deploys the latest commit to the FastAPI backend and Streamlit frontend.
+
+```text
+git push
+   |
+   v
+GitHub Actions
+   |
+   v
+pytest
+   |
+   v
+Render deployment
+```
+
+---
+
+
+
 ## Evaluation Set and Results
 
 The evaluation cases call the real OpenAI model while replacing deterministic tool execution with local fixtures. This tests agent behavior without calling Open-Meteo or OpenFEMA.
