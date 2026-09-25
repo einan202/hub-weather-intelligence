@@ -719,7 +719,7 @@ Manual end-to-end validation was performed through the Streamlit UI, FastAPI bac
 
 GitHub Actions runs the pytest suite automatically on pushes and pull requests to `main`.
 
-If the CI checks pass, Render automatically deploys the latest commit to the FastAPI backend and Streamlit frontend.
+On pushes to `main`, if the test suite passes, the workflow triggers Render Deploy Hooks for both the FastAPI backend and the Streamlit frontend.
 
 ```text
 git push
@@ -731,7 +731,11 @@ GitHub Actions
 pytest
    |
    v
-Render deployment
+Render Deploy Hooks
+   |
+   +--> FastAPI backend
+   |
+   +--> Streamlit frontend
 ```
 
 ---
