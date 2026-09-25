@@ -1,4 +1,5 @@
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -15,6 +16,7 @@ API_BASE_URL = os.getenv(
 
 ERROR_MESSAGE = "The analysis service is unavailable. Please try again."
 REQUEST_TIMEOUT_SECONDS = 120
+HEALTH_TIMEOUT_SECONDS = 8
 
 
 @st.cache_resource
@@ -68,6 +70,16 @@ def _post_chat(message: str, previous_response_id: str | None) -> tuple[str, dic
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
     return _read_chat_response(response)
+
+
+def _warm_backend() -> None:
+    try:
+        requests.get(
+            f"{API_BASE_URL}/health",
+            timeout=HEALTH_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException:
+        return
 
 
 def _render_message(message: dict) -> None:
@@ -308,6 +320,13 @@ if "show_error" not in st.session_state:
 
 if "chat_future" not in st.session_state:
     st.session_state.chat_future = None
+
+if "health_warmup_started" not in st.session_state:
+    st.session_state.health_warmup_started = False
+
+if not st.session_state.health_warmup_started:
+    st.session_state.health_warmup_started = True
+    threading.Thread(target=_warm_backend, daemon=True).start()
 
 chat_future = st.session_state.chat_future
 request_in_flight = chat_future is not None and not chat_future.done()
